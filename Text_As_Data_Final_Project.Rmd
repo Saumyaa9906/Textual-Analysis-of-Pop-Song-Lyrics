@@ -1,0 +1,536 @@
+---
+title: "Pop Songs As Mirror of Today's Society and Orbuculum of Future of Music: Textual Analysis of Pop Song Lyrics"
+author: "Name: Saumyaa Shah  NetID: sns9906"
+geometry: margin=3cm
+fontsize: 12 pt
+spacing: double
+output: 
+  pdf_document: 
+    latex_engine: xelatex
+number_sections: true
+---
+
+### Word-Count(With References): 2385
+
+```{r include=FALSE}
+knitr::opts_chunk$set(comment = NA)
+```
+
+```{r setup, include=FALSE}
+## Setting Working Directory
+
+setwd("/Users/saumyaashah/Text_As_Data_Final_Project")
+getwd()
+
+libraries <- c("ldatuning", "topicmodels", "ggplot2", "dplyr", "rjson", "quanteda", "lubridate", "parallel", "doParallel", "tidytext", "stringi", "tidyr","stm","quanteda.corpora")
+lapply(libraries, require, character.only = TRUE)
+library(quanteda.corpora)
+library(quanteda)
+library(quanteda.textmodels)
+library(bursts)
+library(lsa)
+library(text2vec)
+library(topicmodels)
+library(dplyr)
+library(wordcloud)
+library(pals)
+library(reshape2)
+library(statip)
+```
+
+## Introduction
+
+In this paper, we are interested in examining trends in pop song lyrics over the years, their significance in human history and their influence on future pop songs and artists.
+
+Pop music, in modern context, emerged as a standalone music genre in the mid-1950's. It originally derives influence from folk music and rock 'n' roll. As delineated in [2], pop music has gone through significant changes in music structure and lyrical content. In early 1960's, structurally, pop music was heavily influenced by blues and rock. In contrast, recent pop music is more towards hip-hop and rap. 
+
+Analogous to poems during the Romanticism movement in the 18th century, pop songs can also act as markers in humankind's cultural and political history. As mentioned in [2], socio-economic conditions the artist grew up in, culture and political scenario of society, unforgettable life experiences, etc. have been the primary subjects of early pop songs. For example, many famous artists have composed songs about mental health issues and societal struggles such racial segregation or identifying as queer. Their lyrics not only portray their emotional state of mind, but also reflect the environment they lived in. 
+
+Pop music has also inspired young adults to speak up about their issues and express their thoughts through music. However, in recent years, many studies have blamed pop music for destroying creativity among youngsters and promoting obscenity. Additionally, as described in [5], digital pop music is also used as a marketing strategy by enterprises. By creating a song with repetitive lyrics, they aim to control the minds of young adults and gear them towards their services.
+
+In this paper, we perform a textual analysis of lyrics of pop songs from 1950 to 2019. We examine the most common topics in pop songs and most popularly used words for said topics in a time-series fashion.  We also study the influence of other genres in pop music and predict the musical style of an artist based on the lyrics of their songs. Finally, we perform a burst-analysis of words over time to study the usage of certain words.
+
+## Literature
+
+In 2007, the authors of [6] compiled a corpus of pop song lyrics called Giessen-Bonn Corpus of Popular Music (GBoP) and performed a surface analysis of the vocabulary and grammatical structure of the songs. Various corpus-based analysis such as [8] have been conducted that study the lexicogrammatical structure of lyrics and draw inferences. 
+
+In 2018 Pudding Cup, John Miller[9] conducted a textual analysis of country lyrics using topic modelling. He conducted analysis of popularity of words such as "trucks" and "beer" in country music and also performed a time-series analysis of lexical diversity of lyrics in country music.
+
+In this project, I also perform a similar analysis of popular topics and words in pop music. But, I conduct a further analysis of sub-genres and influences of other genres in pop song lyrics. As opposed to a continuous time series analysis, I perform a burst time-series analysis to analyze word repetitions.
+
+### Methodological Approach
+
+To solve this problem, we follow given steps:
+
+1. Pre-processing and Cleaning The Data
+
+2. Exploratory Data Analysis of Features of Interest
+
+3. Topic Model Training and Prediction on Test Set
+
+4. Visualization of Results using Word Clouds and Graphs
+
+5. Using aformentioned results for Burst Analysis.
+
+### Data Used
+
+The most commonly used datasets for this analysis are musiXmatch dataset[7] that contains song lyrics, stored as bag-of-words representation. Additionally, custom-made datasets are used, which are created by scraping using Spotify API to get artist names and track names and Genius API to get the associated lyrics.
+
+## Theory and Hypotheses
+
+In this paper, we have three main objectives:
+
+
+1. **Predicting the artist's musical style based on their song lyrics**
+On comparing the most common topics in pop songs to the most popular topic of songs from other genres, we expect to find out the genres that most likely influenced the presence of the topic and its related words in the pop song. 
+
+For example, on calculating similarity between 3 most common topics in pop songs and the most common topic of rock music, we find that Topic 1 and 2 are most similar to the rock music topic. We expect the artists whose songs include words from Topic 1 and 2 the most to have a rock/rock-influenced musical style.
+
+2. **Time-series analysis of lyrical trends and sub-genres in pop music**
+On analysing the increase/decrease in the prevalence of a particular lyric topic and sub-genre in spans of a decade, we expect to find the drivers of increase/decrease such as the evolution of rock music from *rock 'n' roll* to *folk and country-style rock* in the 1960s[3], and the increased popularity of hip-hop as a genre in 2010s. 
+
+3. **Burst Analysis of word usage over time**
+By performing burst analysis, we expect to find two things: increase in intensity of word usage due to events/experience and effect of increased usage of certain words on lyrical creativity.
+
+## Data and Methods
+
+### About The Dataset
+
+For our analysis, we use the **Music Dataset: Lyrics and Metadata from 1950 to 2019** dataset[1], which contains structural and acoustic features such as valence, danceability, etc. as well as textual features such as lyrics. The dataset contains songs by popular American artists, as well as transliterated lyrics of songs by artists from other countries such as UK, Canada, India, Korea, etc.
+
+We use a subset of the dataset, containing only the columns: *artist_name, track_name, release_date, genre, lyrics, topic*. 
+
+To evaluate the performance of the model in predicting an artist's music style, we test the model on a self-created dataset of the top 10 most popular pop songs on *Spotify* in 2020. The dataset contains the above columns, and an additional column **Style**, that represents the true musical style of the artist.
+
+### Data Pre-processing
+
+To prepare the data for modelling, we perform the following pre-processing steps:
+
+1. Removal of non-ASCII characters from the "Lyrics" column of the dataset. 
+2. Creating a new column "Decade" from the "Release Date" Column by rounding off each year to the nearest decade.
+
+```{r dc, include=FALSE}
+song_data <- read.csv("tcc_ceds_music.csv", stringsAsFactors = F)
+song_lyrics <- song_data[c("artist_name","track_name","release_date","genre","lyrics","topic")] 
+
+song_lyrics$decade <- round(song_lyrics$release_date, digits = -1)
+song_lyrics$lyrics <- stringi::stri_trans_general(song_lyrics$lyrics, "latin-ascii")
+
+song_lyrics_pop <- song_lyrics[song_lyrics$genre == "pop",]
+song_lyrics_hiphop <- song_lyrics[song_lyrics$genre == "hip hop",]
+song_lyrics_blues <- song_lyrics[song_lyrics$genre == "blues",]
+song_lyrics_country <- song_lyrics[song_lyrics$genre == "country",]
+song_lyrics_reggae <- song_lyrics[song_lyrics$genre == "reggae",]
+song_lyrics_jazz <- song_lyrics[song_lyrics$genre == "jazz",]
+song_lyrics_rock <- song_lyrics[song_lyrics$genre == "rock",]
+```
+
+Additionally, while creating the Document - Feature Matrix (DFM), we remove punctuations, numbers and stopwords, and  convert all words to lowercase.
+
+
+```{r preproc,echo = FALSE}
+
+# Create DFM
+song_lyrics_pop_dfm <-dfm(song_lyrics_pop$lyrics, stem = F, remove_punct = T, tolower = T, remove_numbers = TRUE, remove = stopwords("english"))
+
+song_lyrics_country_dfm <-dfm(song_lyrics_country$lyrics, stem = F, remove_punct = T, tolower = T, remove_numbers = TRUE, remove = stopwords("english"))
+
+song_lyrics_hiphop_dfm <-dfm(song_lyrics_hiphop$lyrics, stem = F, remove_punct = T, tolower = T, remove_numbers = TRUE, remove = stopwords("english"))
+
+song_lyrics_reggae_dfm <-dfm(song_lyrics_reggae$lyrics, stem = F, remove_punct = T, tolower = T, remove_numbers = TRUE, remove = stopwords("english"))
+
+song_lyrics_rock_dfm <-dfm(song_lyrics_rock$lyrics, stem = F, remove_punct = T, tolower = T, remove_numbers = TRUE, remove = stopwords("english"))
+
+song_lyrics_jazz_dfm <-dfm(song_lyrics_jazz$lyrics, stem = F, remove_punct = T, tolower = T, remove_numbers = TRUE, remove = stopwords("english"))
+
+song_lyrics_blues_dfm <-dfm(song_lyrics_blues$lyrics, stem = F, remove_punct = T, tolower = T, remove_numbers = TRUE, remove = stopwords("english"))
+```
+
+### Exploratory Data Analysis
+
+Before model development, we perform an exploratory analysis on the dataset to get an overview of various feature values and distribution of data across various features.
+
+#### Analysis of Given Topic Categories
+
+\footnotesize
+
+```{r eda_1, echo = FALSE}
+unique(song_lyrics[c("topic")])
+```
+
+\normalsize
+
+The **Topic** column of the dataset has 8 unique values. For appropriate comparison, we also set the number of topics(k) in our model to 8, so that we can compare how similar the extracted topics are to the given topics.
+
+#### Analysis of Genre
+
+```{r eda_2, echo = FALSE}
+song_lyrics %>% group_by(genre) %>%
+   summarize(num_songs=n())
+
+#head(hp[order(-hp$num_docs),],10)
+```
+
+The **Genre** column of the dataset has 7 unique values. On observing the number of songs in each genre, we observe that maximum songs belong to the *pop* genre, followed by *country* and *blues*.
+
+#### Pre-liminary Analysis of Pop Song Lyrics
+
+```{r eda_3,echo = FALSE}
+song_lyrics_pop %>% group_by(topic) %>%
+   summarize(num_songs=n())
+```
+
+On performing a preliminary analysis of the number of pop songs in each topic category, we observe that the most common topic in most songs is **sadness**, followed by **world/life**. We use this as a baseline to compare the results of most common topics predicted by the topic model.
+
+### Methods
+
+We use topic modelling to extract the most common topics in pop songs. We also extract the most common topic in other genres using topic modelling and use it to find sub-genres in pop music.
+
+#### Topic Modelling: LDA
+
+To analyse the latent structure of song lyrics, we fit a Latent Dirichlet Allocation(LDA) model with Gibbs sampling for 8 topics(k = 8) and 3000 iterations. 
+
+```{r tm_lda, echo=FALSE}
+k <- 8
+#pop_model <- LDA(song_lyrics_pop_dfm, k = k, method = "Gibbs",  control = list(verbose=25L, seed = 1234, iter = 3000))
+#save(pop_model, file="pop_model.Rdata")
+
+load("pop_model.Rdata")
+load("hiphop_model.Rdata")
+load("country_model.Rdata")
+load("blues_model.Rdata")
+load("rock_model.Rdata")
+load("reggae_model.Rdata")
+load("jazz_model.Rdata")
+```
+
+For further analysis of lyrical meaning of pop songs, we observe the top 10 terms for each of the 8 topics.
+
+```{r tm_1, echo=FALSE}
+terms(pop_model, 10)
+```
+
+### Gamma Distribution: Prevalence of Predicted Topics in Given Topics
+
+To create lyrical themes, we look at the per-document per-topic probabilities i.e. the Gamma probabilities. To find the prevalence of each of the 8 given topics on the predicted topics, we estimate the mean contribution for each predicted topic over each given topic. 
+
+\footnotesize
+
+```{r gamma, echo=FALSE}
+
+topic_gammas <- data.frame(pop_model@gamma) 
+names(topic_gammas) <- seq(1:ncol(topic_gammas)) 
+
+topic_gammas$topics = song_lyrics_pop$topic
+topic_gammas$artist = song_lyrics_pop$artist_name
+
+labels_contrib <- aggregate(cbind(topic_gammas$`1`, topic_gammas$`2`, topic_gammas$`3`, topic_gammas$`4`, topic_gammas$`5`,topic_gammas$`6`,topic_gammas$`7`,topic_gammas$`8`) ~ topics, data=topic_gammas, FUN=mean)
+
+names(labels_contrib) <- c("Given Topics",1,2,3,4,5,6,7,8)
+
+labels_contrib
+```
+
+\normalsize
+
+#### Extraction of Lyrical Themes
+
+On observing the average contribution table of given topics and predicted topics, we observe that certain predicted topics are prevalent in certain given topics. For example, Topic 3 is most prevalent in "Obscene" topic category. Additionally, Topic 2 is almost equally prevalent across all given topics. Using these observations, we name the predicted topics the following:
+
+```{r lms, echo=FALSE}
+
+topic_names <- c("Night/Party","Base Lyrics","Explicit","Romantic","Violent","Melancholic","About Life","Musical")
+
+lblmap = data.frame(topi_number = colnames(labels_contrib)[2:9], predicted_topic = topic_names)
+lblmap
+```
+
+#### Finding Sub-Genres in Pop Songs: Influence of Other Genres
+
+To find the sub-genres, we first subset the dataset by genre and apply topic modelling to all 7 subsets to extract the most common topic in each genre. We then calculate the **Levenshtein distance** between the 8 topics of pop songs and each genre's most common topic. This gives us the most probable origin genre for a particular topic. For example, the Levenshtein distance between Topic 1 and Hip-Hop Topic is the least. So, we can say that the pop songs and the artists where Topic 1 prevails the most are most likely hip-hop/hip-hop influenced songs.
+
+In this way, we find out the sub-genre for each of the  topics.
+
+```{r tm_others, echo=FALSE}
+
+top10_pop <- get_terms(pop_model, 10)
+top10_hp <- get_terms(hiphop_model, 10)
+top10_bl <- get_terms(blues_model, 10)
+top10_ct <- get_terms(country_model, 10)
+top10_jz <- get_terms(jazz_model, 10)
+top10_rg <- get_terms(reggae_model, 10)
+top10_rk <- get_terms(rock_model, 10)
+
+#Pop
+top2_pop <- topics(pop_model, 2)
+
+topic1_doc <- as.data.frame(table(top2_pop[1,])) 
+names(topic1_doc) <- c("Topic Number", "Frequency")
+top_topic_pop <- topic1_doc[order(-topic1_doc$Freq),][1,1]
+
+#Hip - Hop
+top2_hp <- topics(hiphop_model, 2)
+topic1_hp <- as.data.frame(table(top2_hp[1,]))
+top_topic_hp <- topic1_hp[order(-topic1_hp$Freq),][1,1]
+
+#Blues
+top2_bl <- topics(blues_model, 2)
+topic1_bl <- as.data.frame(table(top2_bl[1,]))
+top_topic_bl <- topic1_bl[order(-topic1_bl$Freq),][1,1]
+
+#Country
+top2_ct <- topics(country_model, 2)
+topic1_ct <- as.data.frame(table(top2_ct[1,]))
+top_topic_ct <- topic1_ct[order(-topic1_ct$Freq),][1,1]
+
+#Jazz
+top2_jz <- topics(jazz_model, 2)
+topic1_jz <- as.data.frame(table(top2_jz[1,]))
+top_topic_jz <- topic1_jz[order(-topic1_jz$Freq),][1,1]
+
+#Reggae
+top2_rg <- topics(reggae_model, 2)
+topic1_rg <- as.data.frame(table(top2_rg[1,]))
+top_topic_rg <- topic1_rg[order(-topic1_rg$Freq),][1,1]
+
+#Rock
+top2_rk <- topics(rock_model, 2)
+topic1_rk <- as.data.frame(table(top2_rk[1,]))
+top_topic_rk <- topic1_rk[order(-topic1_rk$Freq),][1,1]
+
+top10_orig_df <- as.data.frame(top10_pop)
+top10_orig_df$hptopic <- top10_hp[,top_topic_hp]
+top10_orig_df$bltopic <- top10_bl[,top_topic_bl]
+top10_orig_df$cttopic <- top10_ct[,top_topic_ct]
+top10_orig_df$jztopic <- top10_jz[,top_topic_jz]
+top10_orig_df$rgtopic <- top10_rg[,top_topic_rg]
+top10_orig_df$rktopic <- top10_rk[,top_topic_rk]
+
+topic1_subg <- c("Hip Hop/Reggae")
+topic2_subg <- c("Country Pop")
+topic3_subg <- c("Reggae/Hip Hop")
+topic4_subg <- c("Country Rock")
+topic5_subg <- c("Country Rock")
+topic6_subg <- c("Country Pop")
+topic7_subg <- c("Rock/Country")
+topic8_subg <- c("Rock/Blues")
+
+topicnames <- c(paste(lblmap[1,2]," - ",topic1_subg),paste(lblmap[2,2]," - ",topic2_subg),paste(lblmap[3,2]," - ",topic3_subg),paste(lblmap[4,2]," - ",topic4_subg),paste(lblmap[5,2]," - ",topic5_subg),paste(lblmap[6,2]," - ",topic6_subg),paste(lblmap[7,2]," - ",topic7_subg),paste(lblmap[8,2]," - ",topic8_subg))
+
+topicnames
+```
+
+#### LDA Prediction on Test Set
+
+To make predictions on test set, we use the posterior distrubution of the model to predict the most common topics in songs from the test set and extract the maximum value i.e. the most common topic for every data point.
+
+## Results
+
+### 1. **Predicting the artist's musical style based on their song lyrics**
+
+```{r artist_style, include=FALSE}
+
+topic_gammas$topics = song_lyrics_pop$topic
+topic_gammas$year = song_lyrics_pop$release_date
+topic_gammas$decade = song_lyrics_pop$decade
+
+labels_contrib1 <- aggregate(cbind(topic_gammas$`1`, topic_gammas$`2`, topic_gammas$`3`, topic_gammas$`4`, topic_gammas$`5`,topic_gammas$`6`,topic_gammas$`7`,topic_gammas$`8`) ~ artist, data=topic_gammas, FUN=mean)
+
+names(labels_contrib1) <- c("Artist",topicnames)
+
+artist_styles <- colnames(labels_contrib1[2:9])[apply(labels_contrib1[2:9],1,which.max)]
+
+artist_style <- data.frame(artist = labels_contrib1$Artist,style = artist_styles)
+
+set.seed(2862)
+sample_n(artist_style, 5)
+```
+
+\scriptsize
+
+```{r test, echo=FALSE}
+
+song_lyrics_test <- read.csv("Music_Lyrics_Test.csv", stringsAsFactors = F)
+
+song_lyrics_test$lyrics <- stringi::stri_trans_general(song_lyrics_test$lyrics, "latin-ascii")
+song_lyrics_test$lyrics <- gsub("\n", " ", song_lyrics_test$lyrics)
+
+song_lyrics_test_dfm <-dfm(song_lyrics_test$lyrics, stem = F, remove_punct = T, tolower = T, remove_numbers = TRUE, remove = stopwords("english"))
+
+test_topics <- posterior(pop_model,song_lyrics_test_dfm)
+test_topics <- apply(test_topics$topics, 1, which.max)
+
+test_topic_names = c()
+for (j in 1:length(test_topics))
+{
+test_topic_names[j] <- topicnames[test_topics[j]]
+}
+
+song_lyrics_test$Predicted_Style <- test_topic_names
+
+subset(song_lyrics_test, select=c(artist_name, Genre, Style, Predicted_Style))
+```
+
+\normalsize
+
+On looking at the musical styles predicted by the model, we observe that the model predicts the style closest to the true musical style of the artist for 7/10 data points.   
+
+```{r tm_2, echo=FALSE}
+pop_dist <- posterior(pop_model)
+
+theta <- pop_dist$topics
+
+topic_proportion_per_decade <- aggregate(theta, by = list(decade = song_lyrics_pop$decade), mean)
+
+colnames(topic_proportion_per_decade)[2:(k+1)] <- topicnames
+```
+
+Looking at the word clouds(Appendix), we observe that the two most common topics in pop songs as predicted by the model are **Violence**, followed by **Melancholy**. This differs from our baseline observation that indicated **Sadness** and **World/Life**. 
+
+#### 2. **Time-series analysis of lyrical themes and sub-genres in pop music**
+
+On observing the barplot visualizing the distribution of topics over the years(Appendix), we observe that the occurence of the topic **Explicit** has increased significantly from 2000-2020. The topic of **Romanctic** dominated the 1960s but its occurence has significantly reduced in 2010-2020. 
+
+In the 1960s, the proportion of **Romantic - Country Rock** is higher. This reflects the evolution of rock music from *rock 'n' roll* to a more folk/country-style rock music. Since **Romantic** is a the most common topic in country music, the pop songs in 1960s were a fusion of country and rock music. 
+
+The sharp rise in the proportion of **Explicit - Hip-Hop/Reggae** in 2010s and 2020s reflects the breakthrough of hip-hop and rap music in the **Billboard Hot 100** chart. It marks the rise of artists like Kendrick Lamar, Drake, Nicki Minaj, etc to fame and also the increased fame of rap producers and DJs.
+
+*Hip-hop/Reggae* as a sub-genre of mainstream pop music shows a continual increase from 1950 t0 2020. Looking at the history of hip-hop[4], it originated in 1970s New York's The Bronx as a cultural movement among African-Americans, Puerto-Ricans and Carribean immigrants. It reflected the harsh economic and political conditions of the city and acted as an outlet for grief, anger and expression of hardships and struggles faced by people due to being immigrants. 
+
+As years went by, more and more generations of immigrants started using hip-hop and rap music as a medium to tell their stories with OG rappers like DJ Kool Herc that inspired a generation of Jamaican young adults to express their sentiments through rap and music. Hence, we can see the rise in the proportion of **Explicit - Hip-Hop/Reggae** topic in pop songs over the years.
+
+### 3. **Burst Analysis of word usage over time**
+
+Looking at the level plot for *heart*(Appendix), we observe that the intensity of usage of the word **heart** increased from 1956 to 1963. Following that period, the intensity level dropped until 2015 where it increased again for a year. To analyze the increase in 1956-1963, we look at the artists with the most releases in that period.
+
+```{r burst_art1, echo=FALSE}
+pop_2011 <- song_lyrics_pop[song_lyrics_pop$release_date >= 1956 & song_lyrics_pop$release_date<= 1963,] %>% group_by(artist_name) %>%
+   summarize(num_docs=n())
+
+head(pop_2011[order(-pop_2011$num_docs),],5)
+```
+
+On looking at the musical styles of the artists, we observe that their styles include R&B, Soul, Brill Building and Country. These releases reflect the 1950s and 1960s where genres like R&B and jazz became more mainstream and rise to prominence of British blues and folk music.
+
+On observing the level plot for the word **yeah**(Appendix), we observe that its usage increased to a level 2 in the 2000s and increased to level 3 in 2018-2019. This bolsters the claim of studies that say that pop song lyrics have become repetitive in the recent years. With the increased need to make songs "catchy", composers tend to add "yeah yeah yeah" and similar terms to songs. This trend is also popular in K-pop songs where the English translation follows the Korean lyrics. 
+
+Since this trend has emerged in the recent years, one can say that to make a song catchy and popular, songwriters compromise with creativity and use words like "yeah" as fillers.
+
+## Discussion
+
+By performing a lyrical analysis of pop songs, we aimed to gain insights into the human mind and the society we live in and the role pop music plays in developing/degrading creativity and development of personality and belief system of young adults.
+
+We used topic modelling to predict an artist's musical style based on their lyrics and conduct a time-series analysis of trends in pop music related to sub-genres and influence of other music genres. We observed that the model predicts on unknown data with 70% accuracy. To improve the performance of the model, the dataset needs to be expanded to include songs from other, lesser known genres such as soul, R&B, folk, etc. Additionally, transliterating from other languages may alter the original meaning of the lyrics, depending upon the accuracy of transliteration. Hence, a multi-lingual textual analysis needs to be performed to get accurate predictions.
+
+My contributions include: using LDA to create sub-genres in pop music based on song lyrics which can be used to improve pop song recommendations based on a user's musical taste. It can also be used to curb recommendations of explicit or inappropriate songs to minors. Secondly, I performed a burst analysis of usage of certain words. The results reflect the change in musical trends over the years, the rise and fall in popularity of certain genres and also creativity in lyrical content. I also conducted a time-series analysis that reftected the increase/decrease in proportion of a particular topic in each decade.
+
+## References
+
+[1] Moura, Luan; Fontelles, Emanuel; Sampaio, Vinicius; França, Mardônio (2020), “Music Dataset: Lyrics and Metadata from 1950 to 2019”, Mendeley Data, V2, doi: 10.17632/3t9vbwxgr5.2
+
+
+[2]Pereira, Carlos Silva, et al. "Music and emotions in the brain: familiarity matters." PloS one 6.11 (2011): e27241.
+
+[3] https://en.wikipedia.org/wiki/1960s_in_music
+
+[4] https://iconcollective.edu/hip-hop-history/
+
+[5] Cha, Kyoung Cheon, et al. "Young consumers’ brain responses to pop music on Youtube." Asia Pacific Journal of Marketing and Logistics (2019).
+
+[6] Kreyer, Rolf, and Joybrato Mukherjee. "The style of pop song lyrics: A corpus-linguistic pilot study." (2007): 31-58.
+
+[7] Thierry Bertin-Mahieux and Daniel P.W. Ellis and Brian Whitman and Paul Lamere. Proceedings of the 12th International Conference on Music Information Retrieval (ISMIR 2011)
+[8] https://github.com/johnwmillr/trucks-and-beer
+
+
+## Appendix
+
+#### Figure 1: Word Clouds of Top 2 Topic in Pop Songs
+
+```{r wordcloud, echo=FALSE}
+
+head(topic1_doc[order(-topic1_doc$Freq),],2)
+
+topicToViz <- 5
+
+top40terms <- sort(pop_dist$terms[topicToViz,], decreasing=TRUE)[1:40]
+words <- names(top40terms)
+
+probabilities <- sort(pop_dist$terms[topicToViz,], decreasing=TRUE)[1:40]
+
+mycolors <- brewer.pal(8, "Dark2")
+wordcloud(words, probabilities, random.order = FALSE, color = mycolors)
+
+topicToViz <- 6
+
+top40terms <- sort(pop_dist$terms[topicToViz,], decreasing=TRUE)[1:40]
+words <- names(top40terms)
+
+probabilities <- sort(pop_dist$terms[topicToViz,], decreasing=TRUE)[1:40]
+
+mycolors <- brewer.pal(8, "Dark2")
+wordcloud(words, probabilities, random.order = FALSE, color = mycolors)
+```
+
+#### Figure 2: Time-series analysis of lyrical themes and sub-genres in pop music
+
+```{r time_topic, echo=FALSE}
+
+vizDataFrame <- melt(topic_proportion_per_decade, id.vars = "decade")
+# plot topic proportions per decade as bar plot
+ggplot(vizDataFrame, aes(x=decade, y=value, fill=variable)) + 
+  geom_bar(stat = "identity") + ylab("proportion") + 
+  scale_fill_manual(values = paste0(alphabet(20), "FF"), name = "Themes") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+```
+
+#### Figure 3: Burst Analysis of "heart"
+
+```{r burst_analysis, fig.align = "center",echo=FALSE}
+
+bursty <- function(word, DTM, date) {
+  word.vec <- DTM[, which(colnames(DTM) == word)]
+  if(length(word.vec) == 0) {
+    print(paste(word, " does not exist in this corpus."))
+    return()
+  } 
+  else {
+    word.times <- c(0,which(as.vector(word.vec)>0))
+    
+    kl <- kleinberg(word.times, gamma = 0.5)
+    kl$start <- date[kl$start+1]
+    kl$end <- date[kl$end]
+    max_level <- max(kl$level)
+    
+    plot(c(kl$start[1], kl$end[1]), c(1,max_level),
+         type = "n", xlab = "Time", ylab = "Level", bty = "n",
+         xlim = c(min(date), max(date)), ylim = c(1, max_level),
+         yaxt = "n")
+    axis(2, at = 1:max_level)
+    
+    for (i in 1:nrow(kl)) {
+      if (kl$start[i] != kl$end[i]) {
+        arrows(kl$start[i], kl$level[i], kl$end[i], kl$level[i], code = 3, angle = 90,
+               length = 0.05)
+      } 
+      else {
+        points(kl$start[i], kl$level[i])
+      }
+    }
+    
+    print(kl)
+  }
+  #note deviation from standard defaults bec don't have that much data
+}
+
+bursty("heart", song_lyrics_pop_dfm, song_lyrics_pop$release_date)
+```
+
+#### Figure 4: Burst Analysis of "yeah"
+
+
+```{r burst_analysis_yeah, fig.align = "center",echo=FALSE}
+bursty("yeah", song_lyrics_pop_dfm, song_lyrics_pop$release_date)
+
+```
